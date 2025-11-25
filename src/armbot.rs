@@ -1,12 +1,13 @@
-use esp_idf_svc::hal::delay::Delay;
 use std::ops::Range;
 
-use crate::gamepad::{Gamepad, Position};
-use crate::ledc_servo::Servo;
+use crate::{
+    gamepad::{Gamepad, Position},
+    ledc_servo::Servo,
+};
 
+#[allow(unused)] // todo remove allow
 pub struct ArmBot<'d, G> {
     config: ArmBotConfig,
-    delay: Delay,
 
     // pub base: Motor,
     shoulder_servo: Servo<'d>,
@@ -29,7 +30,6 @@ impl<'d, G: Gamepad> ArmBot<'d, G> {
     ) -> eyre::Result<Self> {
         Ok(Self {
             config,
-            delay: Delay::new(10_000),
 
             shoulder_servo,
             elbow_servo,
@@ -61,7 +61,7 @@ impl<'d, G: Gamepad> ArmBot<'d, G> {
     pub fn make_step(cmd: &Position, servo: &mut Servo<'d>) -> eyre::Result<()> {
         match cmd {
             Position::Center => {
-                // do noting
+                // do nothing
             }
             Position::Low(step) => {
                 let _ = servo.dir(true);
@@ -76,6 +76,7 @@ impl<'d, G: Gamepad> ArmBot<'d, G> {
     }
 }
 
+#[allow(unused)] // todo remove allow
 pub struct ArmBotConfig {
     /// Desirable range of the shoulder angle.
     pub shoulder_angle_range: Range<usize>,

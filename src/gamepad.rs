@@ -1,15 +1,20 @@
-use std::ops::Range;
+use std::{ops::Range, rc::Rc};
 
-use esp_idf_svc::hal::adc::config::Config;
-use esp_idf_svc::hal::adc::{attenuation, Adc, AdcChannelDriver, AdcDriver};
-use esp_idf_svc::hal::gpio::ADCPin;
-use esp_idf_svc::hal::peripheral::Peripheral;
+use esp_idf_svc::hal::{
+    adc::{
+        attenuation,
+        oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
+        Adc,
+    },
+    gpio::ADCPin,
+    peripheral::Peripheral,
+};
 use log::{debug, info};
 
 use crate::util;
 
 pub struct GamepadConfig {
-    // Min value of joystick.
+    /// Min value of joystick.
     pub joystick_min_value: u32,
     /// Max value of joystick.
     pub joystick_max_value: u32,
@@ -24,7 +29,6 @@ pub struct GamepadConfig {
 }
 
 impl GamepadConfig {
-
     fn center_range(&self, val: u32) -> Range<u32> {
         val - self.center_offset..val + self.center_offset
     }
@@ -115,14 +119,20 @@ impl Position {
     }
 }
 
-pub struct GamepadImpl<'d, ADC: Adc, P0: ADCPin, P1: ADCPin, P2: ADCPin, P3: ADCPin> {
+pub struct GamepadImpl<'d, ADC, P0, P1, P2, P3>
+where
+    ADC: Adc,
+    P0: ADCPin<Adc = ADC>,
+    P1: ADCPin<Adc = ADC>,
+    P2: ADCPin<Adc = ADC>,
+    P3: ADCPin<Adc = ADC>,
+{
     config: GamepadConfig,
-    adc: AdcDriver<'d, ADC>,
 
-    base_rotator: AdcChannelDriver<'d, { attenuation::DB_11 }, P0>,
-    shoulder: AdcChannelDriver<'d, { attenuation::DB_11 }, P1>,
-    elbow: AdcChannelDriver<'d, { attenuation::DB_11 }, P2>,
-    gripper: AdcChannelDriver<'d, { attenuation::DB_11 }, P3>,
+    base_rotator: AdcChannelDriver<'d, P0, Rc<AdcDriver<'d, ADC>>>,
+    shoulder: AdcChannelDriver<'d, P1, Rc<AdcDriver<'d, ADC>>>,
+    elbow: AdcChannelDriver<'d, P2, Rc<AdcDriver<'d, ADC>>>,
+    gripper: AdcChannelDriver<'d, P3, Rc<AdcDriver<'d, ADC>>>,
 
     base_rotator_center: Range<u32>,
     shoulder_center: Range<u32>,
@@ -147,23 +157,21 @@ where
         elbow_pin: P2,
         gripper_pin: P3,
     ) -> eyre::Result<Self> {
-        let adc = AdcDriver::new(adc, &Config::new())?;
+        let adc_driver = Rc::new(AdcDriver::new(adc)?);
 
-        let base_rotator: AdcChannelDriver<{ attenuation::DB_11 }, _> =
-            AdcChannelDriver::new(base_rotator_pin)?;
+        let adc_cfg = AdcChannelConfig {
+            attenuation: attenuation::DB_11, // attenuation 11db means input voltage range to around 0-3.6V
+            ..Default::default()
+        };
 
-        let shoulder: AdcChannelDriver<{ attenuation::DB_11 }, _> =
-            AdcChannelDriver::new(shoulder_pin)?;
-
-        let elbow: AdcChannelDriver<{ attenuation::DB_11 }, _> = AdcChannelDriver::new(elbow_pin)?;
-
-        let gripper: AdcChannelDriver<{ attenuation::DB_11 }, _> =
-            AdcChannelDriver::new(gripper_pin)?;
+        let base_rotator = AdcChannelDriver::new(adc_driver.clone(), base_rotator_pin, &adc_cfg)?;
+        let shoulder = AdcChannelDriver::new(adc_driver.clone(), shoulder_pin, &adc_cfg)?;
+        let elbow = AdcChannelDriver::new(adc_driver.clone(), elbow_pin, &adc_cfg)?;
+        let gripper = AdcChannelDriver::new(adc_driver.clone(), gripper_pin, &adc_cfg)?;
 
         let default_center_range = config.center_range(config.joystick_max_value / 2);
         let mut gamepad = Self {
             config,
-            adc,
             base_rotator,
             shoulder,
             elbow,
@@ -200,10 +208,10 @@ where
     P3: ADCPin<Adc = ADC>,
 {
     fn read_raw_state(&mut self) -> eyre::Result<RawState> {
-        let base_rotator_angle = self.adc.read(&mut self.base_rotator)? as u32;
-        let shoulder_angle = self.adc.read(&mut self.shoulder)? as u32;
-        let elbow_angle = self.adc.read(&mut self.elbow)? as u32;
-        let gripper_angle = self.adc.read(&mut self.gripper)? as u32;
+        let base_rotator_angle = self.base_rotator.read()? as u32;
+        let shoulder_angle = self.shoulder.read()? as u32;
+        let elbow_angle = self.elbow.read()? as u32;
+        let gripper_angle = self.gripper.read()? as u32;
 
         fn normalize_value(val: u32, config: &GamepadConfig) -> u32 {
             val.min(config.joystick_max_value)

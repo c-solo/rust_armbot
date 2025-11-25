@@ -1,11 +1,13 @@
-use esp_idf_svc::hal::ledc;
-use esp_idf_svc::hal::peripherals::Peripherals;
-use std::thread;
-use std::time::Duration;
+use std::{thread, time::Duration};
 
-use crate::armbot::{ArmBot, ArmBotConfig};
-use crate::gamepad::{GamepadConfig, GamepadImpl};
-use crate::ledc_servo::{Servo, ServoConfig};
+use esp_idf_svc::hal::peripherals::Peripherals;
+use eyre::WrapErr;
+
+use crate::{
+    armbot::{ArmBot, ArmBotConfig},
+    gamepad::{GamepadConfig, GamepadImpl},
+    ledc_servo::{Servo, ServoConfig},
+};
 
 mod armbot;
 mod gamepad;
@@ -20,12 +22,12 @@ fn main() -> eyre::Result<()> {
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    let peripherals = Peripherals::take().unwrap();
+    let peripherals = Peripherals::take().expect("peripherals take failed");
 
     let gamepad = GamepadImpl::new(
         GamepadConfig {
             center_offset: 100,
-            .. GamepadConfig::default()
+            ..GamepadConfig::default()
         },
         peripherals.adc1,
         peripherals.pins.gpio0,
@@ -35,7 +37,7 @@ fn main() -> eyre::Result<()> {
     )
     .expect("gamepad init failed");
 
-    let servo_cfg = ServoConfig::sg90(ledc::SpeedMode::LowSpeed);
+    let servo_cfg = ServoConfig::sg90();
 
     let shoulder_servo = Servo::new(
         "shoulder",
@@ -77,7 +79,7 @@ fn main() -> eyre::Result<()> {
 
     loop {
         // do step blocks until the step is done
-        bot.do_step().unwrap();
+        bot.do_step().wrap_err("step failed")?;
         thread::sleep(Duration::from_millis(10)); // todo remove
     }
 }

@@ -3,16 +3,19 @@
 
 #![allow(unused)]
 
-use esp_idf_svc::hal::gpio::OutputPin;
-use esp_idf_svc::hal::ledc;
-use esp_idf_svc::hal::ledc::{LedcChannel, LedcTimer};
-use esp_idf_svc::hal::peripheral::Peripheral;
-use esp_idf_svc::hal::prelude::{FromValueType, Hertz};
-use esp_idf_svc::sys::EspError;
+use std::{marker::PhantomData, ops::Range, time::Duration};
+
+use esp_idf_svc::{
+    hal::{
+        gpio::OutputPin,
+        ledc,
+        ledc::{LedcChannel, LedcTimer, LowSpeed, SpeedMode},
+        peripheral::Peripheral,
+        prelude::{FromValueType, Hertz},
+    },
+    sys::EspError,
+};
 use log::{info, trace};
-use std::marker::PhantomData;
-use std::ops::Range;
-use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct ServoConfig {
@@ -24,32 +27,28 @@ pub struct ServoConfig {
     pub pulse_width_ns: Range<u32>,
     /// PWM resolution in bits.
     pub resolution: ledc::Resolution,
-    /// ESP32 supports High Speed Mode.
-    /// ESP32S2, ESP32S3, ESP32C2 and ESP32C3 supports Low Speed Mode.
-    pub speed_mode: ledc::SpeedMode,
     /// How much add\subtract to 'duty' for making micro step
     pub step: u32,
 }
 
 impl ServoConfig {
-    /// Config for [SG90](https://components101.com/motors/servo-motor-basics-pinout-datasheet).
-    pub fn sg90(speed_mode: ledc::SpeedMode) -> Self {
+    /// Config for [SG90](https://www.friendlywire.com/projects/ne555-servo-safe/SG90-datasheet.pdf).
+    pub fn sg90() -> Self {
         let pulse_width_ns = 500..2600;
         let max_angle = 180.0;
         let step = 5;
         ServoConfig {
             max_angle,
-            frequency: 50.Hz(),
+            frequency: Hertz(50),
             pulse_width_ns,
-            speed_mode,
             resolution: ledc::Resolution::Bits12,
             step,
         }
     }
 
-    /// Config for [SG90S](https://components101.com/motors/mg90s-metal-gear-servo-motor).
-    fn sg90s(speed_mode: ledc::SpeedMode) -> Self {
-        Self::sg90(speed_mode)
+    /// The same config as for [SG90](https://www.friendlywire.com/projects/ne555-servo-safe/SG90-datasheet.pdf).
+    fn sg90s() -> Self {
+        Self::sg90()
     }
 }
 
@@ -64,16 +63,22 @@ pub struct Servo<'d> {
 }
 
 impl<'d> Servo<'d> {
-    pub fn new<T: LedcTimer, C: LedcChannel, P: OutputPin>(
+    /// Creates new servo driver instance for LowSpeed LEDC channel because
+    /// ESP32S2, ESP32S3, ESP32C2 and ESP32C3 supports Low Speed Mode.
+    pub fn new<T, C, P>(
         name: &str,
         config: ServoConfig,
         timer: impl Peripheral<P = T> + 'd,
         channel: impl Peripheral<P = C> + 'd,
         pin: impl Peripheral<P = P> + 'd,
-    ) -> Result<Servo<'d>, EspError> {
+    ) -> Result<Servo<'d>, EspError>
+    where
+        T: LedcTimer<SpeedMode = LowSpeed> + 'd,
+        C: LedcChannel<SpeedMode = LowSpeed> + 'd,
+        P: OutputPin,
+    {
         let timer_config = ledc::config::TimerConfig::default()
             .resolution(config.resolution)
-            .speed_mode(config.speed_mode)
             .frequency(config.frequency);
 
         let timer_driver = ledc::LedcTimerDriver::new(timer, &timer_config)?;

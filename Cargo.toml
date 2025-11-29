@@ -1,9 +1,17 @@
-[package]
-name = "rust-armbot"
-version = "0.2.0"
-authors = ["C.Solovev <constantine.solovev@gmail.com>"]
-edition = "2021"
+[workspace]
+members = [
+    "rust-armbot",
+    "libs/ledc_servo",
+]
 resolver = "2"
+
+[workspace.dependencies]
+log = { version = "0.4", default-features = false }
+esp-idf-hal = { version = "0.45", default-features = false, features = ["std"] }
+esp-idf-sys = { version = "0.36" }
+esp-idf-svc = { version = "0.51.0", default-features = false, features = ["std"] }
+eyre = "0.6"
+embuild = "0.33.1"
 
 [profile.release]
 opt-level = "s"
@@ -11,12 +19,3 @@ opt-level = "s"
 [profile.dev]
 debug = true    # Symbols are nice, and they don't increase the size on Flash
 opt-level = "z"
-
-[dependencies]
-log = { version = "0.4", default-features = false }
-esp-idf-svc = { version = "0.51.0", default-features = false, features = ["std"]}
-
-eyre = "0.6"
-
-[build-dependencies]
-embuild = "0.33.1"

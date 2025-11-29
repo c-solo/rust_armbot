@@ -3,19 +3,19 @@ use std::{thread, time::Duration};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use eyre::WrapErr;
 
+use ledc_servo::{Servo, ServoConfig};
+
 use crate::{
     armbot::{ArmBot, ArmBotConfig},
     gamepad::{GamepadConfig, GamepadImpl},
-    ledc_servo::{Servo, ServoConfig},
 };
 
 mod armbot;
 mod gamepad;
-mod ledc_servo;
 mod util;
 
 fn main() -> eyre::Result<()> {
-    // It is necessary to call this function once. Otherwise some patches to the runtime
+    // It is necessary to call this function once. Otherwise, some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
 
@@ -78,7 +78,6 @@ fn main() -> eyre::Result<()> {
     log::info!("Arm bot initialized");
 
     loop {
-        // do step blocks until the step is done
         bot.do_step().wrap_err("step failed")?;
         thread::sleep(Duration::from_millis(10)); // todo remove
     }

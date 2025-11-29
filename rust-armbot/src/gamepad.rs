@@ -29,6 +29,7 @@ pub struct GamepadConfig {
 }
 
 impl GamepadConfig {
+    /// Sets range that will be considered as center.
     fn center_range(&self, val: u32) -> Range<u32> {
         val - self.center_offset..val + self.center_offset
     }

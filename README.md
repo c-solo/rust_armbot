@@ -1,5 +1,12 @@
 ## Rust firmware for robotic arm based on ESP32-C3 SuperMini board.
 
+### Project Structure
+
+This is a Cargo workspace with the following crates:
+
+- `rust-armbot` - Main firmware application for robo arm
+- `libs/ledc_servo` - Library for controlling servo motors via LEDC peripheral
+
 Electronic parts:
 
 - Esp32-C3 SuperMini (any ESP32 C3 or C6 board is suitable).

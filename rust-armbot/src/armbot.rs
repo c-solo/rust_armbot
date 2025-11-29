@@ -1,9 +1,8 @@
 use std::ops::Range;
 
-use crate::{
-    gamepad::{Gamepad, Position},
-    ledc_servo::Servo,
-};
+use ledc_servo::Servo;
+
+use crate::gamepad::{Gamepad, Position};
 
 #[allow(unused)] // todo remove allow
 pub struct ArmBot<'d, G> {
@@ -50,10 +49,10 @@ impl<'d, G: Gamepad> ArmBot<'d, G> {
             return Ok(());
         }
 
-        // todo make step of base_rotator
         Self::make_step(&state.shoulder, &mut self.shoulder_servo)?;
         Self::make_step(&state.elbow, &mut self.elbow_servo)?;
         Self::make_step(&state.gripper, &mut self.gripper_servo)?;
+        // todo add base_rotator
 
         Ok(())
     }
@@ -64,11 +63,12 @@ impl<'d, G: Gamepad> ArmBot<'d, G> {
                 // do nothing
             }
             Position::Low(step) => {
-                let _ = servo.dir(true);
+                servo.forward();
+                servo.forward();
                 servo.step(*step)?;
             }
             Position::High(step) => {
-                let _ = servo.dir(false);
+                servo.backward();
                 servo.step(*step)?;
             }
         }

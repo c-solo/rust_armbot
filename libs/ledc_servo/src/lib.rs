@@ -5,16 +5,14 @@
 
 use std::{marker::PhantomData, ops::Range, time::Duration};
 
-use esp_idf_svc::{
-    hal::{
-        gpio::OutputPin,
-        ledc,
-        ledc::{LedcChannel, LedcTimer, LowSpeed, SpeedMode},
-        peripheral::Peripheral,
-        prelude::{FromValueType, Hertz},
-    },
-    sys::EspError,
+use esp_idf_hal::{
+    gpio::OutputPin,
+    ledc,
+    ledc::{LedcChannel, LedcTimer, LowSpeed, SpeedMode},
+    peripheral::Peripheral,
+    prelude::{FromValueType, Hertz},
 };
+use esp_idf_sys::EspError;
 use log::{info, trace};
 
 #[derive(Debug, Clone)]
@@ -124,16 +122,28 @@ impl<'d> Servo<'d> {
         Ok(true)
     }
 
+    /// Set servo to move forward (increase angle).
+    pub fn forward(&mut self) {
+        self.direction = true;
+    }
+
+    /// Set servo to move backward (decrease angle).
+    pub fn backward(&mut self) {
+        self.direction = false;
+    }
+
+    /// Returns true if servo is set to move forward (increase angle).
+    pub fn is_forward(&self) -> bool {
+        self.direction
+    }
+
     /// Sets new direction value, returns old direction value.
+    /// Prefer using `forward()` and `backward()` methods instead.
+    #[deprecated(since = "0.2.0", note = "Use `forward()` or `backward()` instead")]
     pub fn dir(&mut self, direction: bool) -> bool {
         let old = self.direction;
         self.direction = direction;
         old
-    }
-
-    // Returns current direction value.
-    pub fn get_dir(&self) -> bool {
-        self.direction
     }
 
     /// Returns current angle value.
@@ -162,6 +172,7 @@ fn calc_duty_range(config: &ServoConfig, max_duty: u32) -> Range<u32> {
     let max_duty = pulse_to_duty(config, max_pulse, max_duty);
     min_duty..max_duty
 }
+
 
 /// Transforms 'duty' to 'angle' in respect that given servo pulse range.
 fn calculate_angle(config: &ServoConfig, duty: u32, max_duty: u32) -> f64 {

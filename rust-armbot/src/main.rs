@@ -2,7 +2,6 @@ use std::{thread, time::Duration};
 
 use esp_idf_svc::hal::peripherals::Peripherals;
 use eyre::WrapErr;
-
 use ledc_servo::{Servo, ServoConfig};
 
 use crate::{

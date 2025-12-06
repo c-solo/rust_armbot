@@ -1,8 +1,14 @@
-use std::{thread, time::Duration};
+#![no_std]
+#![no_main]
 
-use esp_idf_svc::hal::peripherals::Peripherals;
-use eyre::WrapErr;
-use ledc_servo::{Servo, ServoConfig};
+use esp_backtrace as _;
+use esp_hal::{
+    delay::Delay,
+    ledc::{channel, timer, timer::config::Duty, Ledc},
+    peripherals::{ADC1, GPIO0, GPIO1, GPIO2, GPIO3},
+    Config,
+};
+use esp_hal_servo::{Servo, ServoConfig};
 
 use crate::{
     armbot::{ArmBot, ArmBotConfig},
@@ -10,60 +16,68 @@ use crate::{
 };
 
 mod armbot;
+mod error;
 mod gamepad;
 mod util;
 
-fn main() -> eyre::Result<()> {
-    // It is necessary to call this function once. Otherwise, some patches to the runtime
-    // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
-    esp_idf_svc::sys::link_patches();
+esp_bootloader_esp_idf::esp_app_desc!();
 
-    // Bind the log crate to the ESP Logging facilities
-    esp_idf_svc::log::EspLogger::initialize_default();
+#[riscv_rt::entry]
+fn main() -> ! {
+    let peripherals = esp_hal::init(Config::default());
 
-    let peripherals = Peripherals::take().expect("peripherals take failed");
-
-    let gamepad = GamepadImpl::new(
-        GamepadConfig {
-            center_offset: 100,
-            ..GamepadConfig::default()
-        },
-        peripherals.adc1,
-        peripherals.pins.gpio0,
-        peripherals.pins.gpio1,
-        peripherals.pins.gpio2,
-        peripherals.pins.gpio3,
-    )
-    .expect("gamepad init failed");
-
-    let servo_cfg = ServoConfig::sg90();
+    let servo_cfg = ServoConfig::sg90(Duty::Duty14Bit);
+    let mut ledc = Ledc::new(peripherals.LEDC);
+    let timer = servo_cfg
+        .configure_timer(
+            &mut ledc,
+            timer::Number::Timer0,
+            timer::LSClockSource::APBClk,
+        )
+        .expect("failed to configure timer");
 
     let shoulder_servo = Servo::new(
         "shoulder",
         servo_cfg.clone(),
-        peripherals.ledc.timer0,
-        peripherals.ledc.channel0,
-        peripherals.pins.gpio5,
+        &mut ledc,
+        &timer,
+        channel::Number::Channel0,
+        peripherals.GPIO5,
     )
     .expect("shoulder init failed");
 
     let elbow_servo = Servo::new(
         "elbow",
         servo_cfg.clone(),
-        peripherals.ledc.timer1,
-        peripherals.ledc.channel1,
-        peripherals.pins.gpio6,
+        &mut ledc,
+        &timer,
+        channel::Number::Channel0,
+        peripherals.GPIO6,
     )
     .expect("elbow init failed");
 
     let gripper_servo = Servo::new(
         "gripper",
         servo_cfg,
-        peripherals.ledc.timer2,
-        peripherals.ledc.channel2,
-        peripherals.pins.gpio7,
+        &mut ledc,
+        &timer,
+        channel::Number::Channel0,
+        peripherals.GPIO7,
     )
     .expect("gripper init failed");
+
+    let gamepad: GamepadImpl<ADC1, GPIO0, GPIO1, GPIO2, GPIO3> = GamepadImpl::new(
+        GamepadConfig {
+            center_offset: 100,
+            ..GamepadConfig::default()
+        },
+        peripherals.ADC1,
+        peripherals.GPIO0,
+        peripherals.GPIO1,
+        peripherals.GPIO2,
+        peripherals.GPIO3,
+    )
+    .expect("gamepad init failed");
 
     let mut bot = ArmBot::new(
         ArmBotConfig::default(),
@@ -76,8 +90,11 @@ fn main() -> eyre::Result<()> {
 
     log::info!("Arm bot initialized");
 
+    let delay = Delay::new();
     loop {
-        bot.do_step().wrap_err("step failed")?;
-        thread::sleep(Duration::from_millis(10)); // todo remove
+        if let Err(e) = bot.do_step() {
+            log::error!("step failed: {:?}", e);
+        }
+        delay.delay_millis(10); // todo remove
     }
 }

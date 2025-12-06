@@ -1,17 +1,21 @@
-use std::ops::Range;
+use core::ops::Range;
 
-use ledc_servo::Servo;
+use esp_hal::ledc::timer::TimerSpeed;
+use esp_hal_servo::{Dir, Servo};
 
-use crate::gamepad::{Gamepad, Position};
+use crate::{
+    error::Error,
+    gamepad::{Gamepad, Position},
+};
 
 #[allow(unused)] // todo remove allow
-pub struct ArmBot<'d, G> {
+pub struct ArmBot<'d, G, S: TimerSpeed> {
     config: ArmBotConfig,
 
     // pub base: Motor,
-    shoulder_servo: Servo<'d>,
-    elbow_servo: Servo<'d>,
-    gripper_servo: Servo<'d>,
+    shoulder_servo: Servo<'d, S>,
+    elbow_servo: Servo<'d, S>,
+    gripper_servo: Servo<'d, S>,
 
     gamepad: G,
     elbow_angle: f64,
@@ -19,14 +23,14 @@ pub struct ArmBot<'d, G> {
     gripper_angle: f64,
 }
 
-impl<'d, G: Gamepad> ArmBot<'d, G> {
+impl<'d, G: Gamepad, S: TimerSpeed> ArmBot<'d, G, S> {
     pub fn new(
         config: ArmBotConfig,
         gamepad: G,
-        shoulder_servo: Servo<'d>,
-        elbow_servo: Servo<'d>,
-        gripper_servo: Servo<'d>,
-    ) -> eyre::Result<Self> {
+        shoulder_servo: Servo<'d, S>,
+        elbow_servo: Servo<'d, S>,
+        gripper_servo: Servo<'d, S>,
+    ) -> Result<Self, Error> {
         Ok(Self {
             config,
 
@@ -42,7 +46,7 @@ impl<'d, G: Gamepad> ArmBot<'d, G> {
     }
 
     /// Makes the arm bot do a cycle of its movement.
-    pub fn do_step(&mut self) -> eyre::Result<()> {
+    pub fn do_step(&mut self) -> Result<(), Error> {
         let state = self.gamepad.read_state(&self.config.step_size)?;
         if state.is_center() {
             // noting to do
@@ -57,19 +61,18 @@ impl<'d, G: Gamepad> ArmBot<'d, G> {
         Ok(())
     }
 
-    pub fn make_step(cmd: &Position, servo: &mut Servo<'d>) -> eyre::Result<()> {
+    pub fn make_step(cmd: &Position, servo: &mut Servo<'d, S>) -> Result<(), Error> {
         match cmd {
             Position::Center => {
                 // do nothing
             }
             Position::Low(step) => {
-                servo.forward();
-                servo.forward();
-                servo.step(*step)?;
+                servo.set_dir(Dir::CW);
+                servo.step(*step as f32)?;
             }
             Position::High(step) => {
-                servo.backward();
-                servo.step(*step)?;
+                servo.set_dir(Dir::CCW);
+                servo.step(*step as f32)?;
             }
         }
         Ok(())

@@ -1,17 +1,13 @@
-use std::{ops::Range, rc::Rc};
+use core::ops::Range;
 
-use esp_idf_svc::hal::{
-    adc::{
-        attenuation,
-        oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
-        Adc,
-    },
-    gpio::ADCPin,
-    peripheral::Peripheral,
+use esp_hal::{
+    analog::adc::{Adc, AdcChannel, AdcConfig, AdcPin, Attenuation, RegisterAccess},
+    gpio::AnalogPin,
+    Blocking,
 };
 use log::{debug, info};
 
-use crate::util;
+use crate::{error::Error, util};
 
 pub struct GamepadConfig {
     /// Min value of joystick.
@@ -29,9 +25,9 @@ pub struct GamepadConfig {
 }
 
 impl GamepadConfig {
-    /// Sets range that will be considered as center.
-    fn center_range(&self, val: u32) -> Range<u32> {
-        val - self.center_offset..val + self.center_offset
+    /// Sets offset `[center-offset, center+offset]` that will be considered as center.
+    fn center_range(&self, offset: u32) -> Range<u32> {
+        offset - self.center_offset..offset + self.center_offset
     }
 }
 
@@ -48,10 +44,10 @@ impl Default for GamepadConfig {
 
 pub trait Gamepad {
     /// Returns raw values of joystick.
-    fn read_raw_state(&mut self) -> eyre::Result<RawState>;
+    fn read_raw_state(&mut self) -> Result<RawState, Error>;
 
     /// Returns state of joystick mapped to the specified output range.
-    fn read_state(&mut self, output: &Range<u32>) -> eyre::Result<State>;
+    fn read_state(&mut self, output: &Range<u32>) -> Result<State, Error>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -120,20 +116,15 @@ impl Position {
     }
 }
 
-pub struct GamepadImpl<'d, ADC, P0, P1, P2, P3>
-where
-    ADC: Adc,
-    P0: ADCPin<Adc = ADC>,
-    P1: ADCPin<Adc = ADC>,
-    P2: ADCPin<Adc = ADC>,
-    P3: ADCPin<Adc = ADC>,
-{
+pub struct GamepadImpl<'d, ADC: RegisterAccess + 'd, P0, P1, P2, P3> {
     config: GamepadConfig,
 
-    base_rotator: AdcChannelDriver<'d, P0, Rc<AdcDriver<'d, ADC>>>,
-    shoulder: AdcChannelDriver<'d, P1, Rc<AdcDriver<'d, ADC>>>,
-    elbow: AdcChannelDriver<'d, P2, Rc<AdcDriver<'d, ADC>>>,
-    gripper: AdcChannelDriver<'d, P3, Rc<AdcDriver<'d, ADC>>>,
+    /// ADC driver in blocking mode.
+    adc: Adc<'d, ADC, Blocking>,
+    base_rotator_pin: AdcPin<P0, ADC>,
+    shoulder_pin: AdcPin<P1, ADC>,
+    elbow_pin: AdcPin<P2, ADC>,
+    gripper_pin: AdcPin<P3, ADC>,
 
     base_rotator_center: Range<u32>,
     shoulder_center: Range<u32>,
@@ -141,42 +132,37 @@ where
     gripper_center: Range<u32>,
 }
 
-impl<'d, ADC: Adc, P0: ADCPin, P1: ADCPin, P2: ADCPin, P3: ADCPin>
-    GamepadImpl<'d, ADC, P0, P1, P2, P3>
+impl<'d, ADC, P0, P1, P2, P3> GamepadImpl<'d, ADC, P0, P1, P2, P3>
 where
-    ADC: Adc,
-    P0: ADCPin<Adc = ADC>,
-    P1: ADCPin<Adc = ADC>,
-    P2: ADCPin<Adc = ADC>,
-    P3: ADCPin<Adc = ADC>,
+    ADC: RegisterAccess + 'd,
+    P0: AnalogPin + AdcChannel,
+    P1: AnalogPin + AdcChannel,
+    P2: AnalogPin + AdcChannel,
+    P3: AnalogPin + AdcChannel,
 {
     pub fn new(
         config: GamepadConfig,
-        adc: impl Peripheral<P = ADC> + 'd,
+        adc: ADC,
         base_rotator_pin: P0,
         shoulder_pin: P1,
         elbow_pin: P2,
         gripper_pin: P3,
-    ) -> eyre::Result<Self> {
-        let adc_driver = Rc::new(AdcDriver::new(adc)?);
-
-        let adc_cfg = AdcChannelConfig {
-            attenuation: attenuation::DB_11, // attenuation 11db means input voltage range to around 0-3.6V
-            ..Default::default()
-        };
-
-        let base_rotator = AdcChannelDriver::new(adc_driver.clone(), base_rotator_pin, &adc_cfg)?;
-        let shoulder = AdcChannelDriver::new(adc_driver.clone(), shoulder_pin, &adc_cfg)?;
-        let elbow = AdcChannelDriver::new(adc_driver.clone(), elbow_pin, &adc_cfg)?;
-        let gripper = AdcChannelDriver::new(adc_driver.clone(), gripper_pin, &adc_cfg)?;
+    ) -> Result<Self, Error> {
+        let mut adc_config = AdcConfig::new();
+        let base_rotator_pin = adc_config.enable_pin(base_rotator_pin, Attenuation::_11dB);
+        let shoulder_pin = adc_config.enable_pin(shoulder_pin, Attenuation::_11dB);
+        let elbow_pin = adc_config.enable_pin(elbow_pin, Attenuation::_11dB);
+        let gripper_pin = adc_config.enable_pin(gripper_pin, Attenuation::_11dB);
+        let adc = Adc::new(adc, adc_config);
 
         let default_center_range = config.center_range(config.joystick_max_value / 2);
         let mut gamepad = Self {
             config,
-            base_rotator,
-            shoulder,
-            elbow,
-            gripper,
+            adc,
+            base_rotator_pin,
+            shoulder_pin,
+            elbow_pin,
+            gripper_pin,
             base_rotator_center: default_center_range.clone(),
             shoulder_center: default_center_range.clone(),
             elbow_center: default_center_range.clone(),
@@ -202,17 +188,29 @@ where
 
 impl<'d, ADC, P0, P1, P2, P3> Gamepad for GamepadImpl<'d, ADC, P0, P1, P2, P3>
 where
-    ADC: Adc,
-    P0: ADCPin<Adc = ADC>,
-    P1: ADCPin<Adc = ADC>,
-    P2: ADCPin<Adc = ADC>,
-    P3: ADCPin<Adc = ADC>,
+    ADC: RegisterAccess + 'd,
+    P0: AnalogPin + AdcChannel,
+    P1: AnalogPin + AdcChannel,
+    P2: AnalogPin + AdcChannel,
+    P3: AnalogPin + AdcChannel,
 {
-    fn read_raw_state(&mut self) -> eyre::Result<RawState> {
-        let base_rotator_angle = self.base_rotator.read()? as u32;
-        let shoulder_angle = self.shoulder.read()? as u32;
-        let elbow_angle = self.elbow.read()? as u32;
-        let gripper_angle = self.gripper.read()? as u32;
+    fn read_raw_state(&mut self) -> Result<RawState, Error> {
+        let base_rotator_angle = self
+            .adc
+            .read_oneshot(&mut self.base_rotator_pin)
+            .map_err(|_| Error::Adc)? as u32;
+        let shoulder_angle = self
+            .adc
+            .read_oneshot(&mut self.shoulder_pin)
+            .map_err(|_| Error::Adc)? as u32;
+        let elbow_angle = self
+            .adc
+            .read_oneshot(&mut self.elbow_pin)
+            .map_err(|_| Error::Adc)? as u32;
+        let gripper_angle = self
+            .adc
+            .read_oneshot(&mut self.gripper_pin)
+            .map_err(|_| Error::Adc)? as u32;
 
         fn normalize_value(val: u32, config: &GamepadConfig) -> u32 {
             val.min(config.joystick_max_value)
@@ -229,7 +227,7 @@ where
         Ok(state)
     }
 
-    fn read_state(&mut self, output: &Range<u32>) -> eyre::Result<State> {
+    fn read_state(&mut self, output: &Range<u32>) -> Result<State, Error> {
         let state = self.read_raw_state()?;
         let state = State {
             base_rotator: Position::new(

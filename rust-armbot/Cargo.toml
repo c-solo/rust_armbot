@@ -5,10 +5,13 @@ authors = ["C.Solovev <constantine.solovev@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-log.workspace = true
-esp-idf-svc.workspace = true
-eyre.workspace = true
-ledc_servo = { path = "../libs/ledc_servo" }
+esp-hal = { workspace = true, features = ["defmt"] }
+esp-hal-servo.workspace = true
 
-[build-dependencies]
-embuild.workspace = true
+riscv-rt.workspace = true
+esp-println.workspace = true
+nb.workspace = true
+esp-backtrace.workspace = true
+esp-bootloader-esp-idf.workspace = true
+
+log.workspace = true
